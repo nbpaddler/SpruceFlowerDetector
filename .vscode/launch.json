@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Detect Strobili",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/detect_strobili.py",
+      "args": ["--image", "/Users/gvirg/Documents/Cones.png", "--show"],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Tune HSV",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/detect_strobili.py",
+      "args": ["--image", "/Users/gvirg/Documents/Cones.png", "--tune"],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Visualize Labels",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/visualize_labels.py",
+      "args": ["--image", "/Users/gvirg/Documents/Cones.png", "--label", "${workspaceFolder}/labels/Cones.txt"],
+      "console": "integratedTerminal"
+    }
+  ]
+}
