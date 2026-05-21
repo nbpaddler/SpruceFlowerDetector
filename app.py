@@ -14,6 +14,9 @@ FLOWER_UPPER_B = np.array([180, 255, 210])
 MIN_AREA_FRAC = 0.00010
 MAX_AREA_FRAC = 0.02950
 
+GRID_COLOR  = (255, 215, 0)   # cyan in BGR
+GRID_LABELS = ["Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right"]
+
 
 def blob_confidence(cnt):
     hull = cv2.convexHull(cnt)
@@ -23,7 +26,7 @@ def blob_confidence(cnt):
     return cv2.contourArea(cnt) / hull_area
 
 
-def detect_flowers(img_array, scale):
+def detect_flowers(img_array, scale, show_grid):
     h_img, w_img = img_array.shape[:2]
     img_area = h_img * w_img
 
@@ -45,6 +48,7 @@ def detect_flowers(img_array, scale):
     count = 0
     solidities = []
     diameters = []
+    centers = []
 
     for cnt in contours:
         area = cv2.contourArea(cnt)
@@ -57,6 +61,7 @@ def detect_flowers(img_array, scale):
         x, y, w, h = cv2.boundingRect(cnt)
         cx, cy = x + w // 2, y + h // 2
         diameters.append(min(w, h))
+        centers.append((cx, cy))
 
         dot_r = max(3, min(w, h) // 3)
 
@@ -76,6 +81,40 @@ def detect_flowers(img_array, scale):
         cv2.putText(output, str(count), (cx + dot_r + 2, cy + 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
 
+    # ── Quadrant grid ────────────────────────────────────────────────────────
+    mid_x = w_img // 2
+    mid_y = h_img // 2
+
+    quadrant_counts = [0, 0, 0, 0]  # TL, TR, BL, BR
+    for (cx, cy) in centers:
+        col = 0 if cx < mid_x else 1
+        row = 0 if cy < mid_y else 1
+        quadrant_counts[row * 2 + col] += 1
+
+    if show_grid:
+        thickness = max(2, w_img // 400)
+        font_scale_grid = max(0.8, w_img / 1000)
+
+        # Grid lines
+        cv2.line(output, (mid_x, 0),     (mid_x, h_img), GRID_COLOR, thickness)
+        cv2.line(output, (0, mid_y),     (w_img, mid_y), GRID_COLOR, thickness)
+        cv2.rectangle(output, (0, 0), (w_img - 1, h_img - 1), GRID_COLOR, thickness)
+
+        # Per-quadrant count labels
+        quadrant_centers = [
+            (mid_x // 2,           mid_y // 2),
+            (mid_x + mid_x // 2,   mid_y // 2),
+            (mid_x // 2,           mid_y + mid_y // 2),
+            (mid_x + mid_x // 2,   mid_y + mid_y // 2),
+        ]
+        for (lx, ly), qc, label in zip(quadrant_centers, quadrant_counts, GRID_LABELS):
+            text = f"{label}: {qc}"
+            cv2.putText(output, text, (lx - 60, ly),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale_grid, (255, 255, 255), 4)
+            cv2.putText(output, text, (lx - 60, ly),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale_grid, GRID_COLOR, 2)
+
+    # ── Summary banner ───────────────────────────────────────────────────────
     avg_confidence = round(float(np.mean(solidities)) * 100, 1) if solidities else 0.0
     avg_diameter   = round(float(np.mean(diameters)),  1)        if diameters  else 0.0
 
@@ -112,7 +151,7 @@ def detect_flowers(img_array, scale):
                 cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 180), 2)
 
     output_rgb = cv2.cvtColor(output, cv2.COLOR_BGR2RGB)
-    return count, confidence_label, avg_confidence, notes, avg_diameter, scale_description, output_rgb
+    return count, confidence_label, avg_confidence, notes, avg_diameter, scale_description, quadrant_counts, output_rgb
 
 
 def pil_to_bgr(pil_img):
@@ -137,9 +176,8 @@ st.set_page_config(page_title="Spruce Flower Detector", layout="wide")
 st.title("Spruce Flower Detector")
 st.caption("Upload one or more photos of white spruce trees to count flowers.")
 
-# Initialise session state
 if "results" not in st.session_state:
-    st.session_state.results = {}   # keyed by filename
+    st.session_state.results = {}
 
 with st.sidebar:
     st.header("Settings")
@@ -162,6 +200,10 @@ with st.sidebar:
     st.caption("Increase if flowers appear large (close-up). Decrease if they appear small (far away).")
 
     st.divider()
+    show_grid = st.toggle("Show quadrant grid", value=True)
+    st.caption("Divides each image into 4 quadrants and counts flowers per section.")
+
+    st.divider()
     with st.expander("How confidence works"):
         st.markdown("""
 Each blob is scored by **solidity** (filled area ÷ convex hull area).
@@ -179,16 +221,17 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# Process any newly uploaded files not yet in session state for the current scale
 if uploaded_files:
-    new_files = [f for f in uploaded_files if (f.name, scale) not in st.session_state.results]
+    cache_key = lambda name: (name, scale, show_grid)
+    new_files = [f for f in uploaded_files if cache_key(f.name) not in st.session_state.results]
+
     if new_files:
         with st.spinner(f"Processing {len(new_files)} image(s)..."):
             for uploaded_file in new_files:
                 pil_img = Image.open(uploaded_file)
                 bgr = pil_to_bgr(pil_img)
-                count, confidence_label, conf_raw, notes, avg_diameter, scale_desc, annotated = detect_flowers(bgr, scale)
-                st.session_state.results[(uploaded_file.name, scale)] = {
+                count, confidence_label, conf_raw, notes, avg_diameter, scale_desc, quadrant_counts, annotated = detect_flowers(bgr, scale, show_grid)
+                st.session_state.results[cache_key(uploaded_file.name)] = {
                     "filename":         uploaded_file.name,
                     "count":            count,
                     "confidence_label": confidence_label,
@@ -196,25 +239,28 @@ if uploaded_files:
                     "notes":            notes,
                     "avg_diameter":     avg_diameter,
                     "scale_desc":       scale_desc,
+                    "quadrant_counts":  quadrant_counts,
                     "annotated":        annotated,
                     "download_bytes":   img_to_download_bytes(annotated),
                     "scale":            scale,
                 }
 
-    # Remove results for files that were deselected in the uploader
     uploaded_names = {f.name for f in uploaded_files}
     for key in list(st.session_state.results.keys()):
         if key[0] not in uploaded_names:
             del st.session_state.results[key]
 
-# Only show results for the current scale setting
-results = [v for k, v in st.session_state.results.items() if k[1] == scale]
+results = [v for k, v in st.session_state.results.items() if k[1] == scale and k[2] == show_grid]
 
 if results:
     st.subheader("Summary")
     df = pd.DataFrame([{
         "Image":            r["filename"],
-        "Flowers Detected": r["count"],
+        "Total Flowers":    r["count"],
+        "Top-Left":         r["quadrant_counts"][0],
+        "Top-Right":        r["quadrant_counts"][1],
+        "Bottom-Left":      r["quadrant_counts"][2],
+        "Bottom-Right":     r["quadrant_counts"][3],
         "Avg Flower Size":  r["scale_desc"],
         "Confidence":       r["confidence_label"],
         "Notes":            r["notes"],
@@ -223,12 +269,16 @@ if results:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     col1, col2 = st.columns(2)
-    col1.metric("Total flowers across all images", df["Flowers Detected"].sum())
+    col1.metric("Total flowers across all images", df["Total Flowers"].sum())
     col2.metric("Images processed", len(results))
 
     csv_df = pd.DataFrame([{
         "Image":                    r["filename"],
-        "Flowers Detected":         r["count"],
+        "Total Flowers":            r["count"],
+        "Quadrant: Top-Left":       r["quadrant_counts"][0],
+        "Quadrant: Top-Right":      r["quadrant_counts"][1],
+        "Quadrant: Bottom-Left":    r["quadrant_counts"][2],
+        "Quadrant: Bottom-Right":   r["quadrant_counts"][3],
         "Avg Flower Diameter (px)": r["avg_diameter"],
         "Camera Distance":          r["scale_desc"],
         "Scale Setting":            r["scale"],
@@ -257,10 +307,9 @@ if results:
                 data=r["download_bytes"],
                 file_name=r["filename"].rsplit(".", 1)[0] + "_detected.png",
                 mime="image/png",
-                key=f"dl_{r['filename']}"
+                key=f"dl_{r['filename']}_{scale}_{show_grid}"
             )
-            if col_del.button("Remove image", key=f"del_{r['filename']}_{scale}", type="secondary"):
-                # Remove this image at all scale settings
+            if col_del.button("Remove image", key=f"del_{r['filename']}_{scale}_{show_grid}", type="secondary"):
                 for key in [k for k in st.session_state.results if k[0] == r["filename"]]:
                     del st.session_state.results[key]
                 st.rerun()
