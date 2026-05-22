@@ -5,6 +5,8 @@ import pandas as pd
 from PIL import Image
 import io
 
+st.cache_data.clear()
+
 # HSV ranges for flowers (red wraps in HSV, need two ranges)
 FLOWER_LOWER_A = np.array([0,   75, 45])
 FLOWER_UPPER_A = np.array([12, 255, 210])
